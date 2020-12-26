@@ -36,64 +36,74 @@ world_population = {
 
 def get_args():
     parser = argparse.ArgumentParser(
-        description="Examples:\n"
-                    "$ python3 sir_model.py --simulate 1 -i 1 -a 0.1 -b 0.35 -d 100 -ps 100\n" 
-                    "python3 sir_model.py --country Liberia",
+        description="SIR Model simulator for Zaire ebola 2014 diesease\n"
+                    "-------------------- MODES --------------------------\n"
+                    "1) classic simulator\n"
+                    "   Example: $ python3 sir_model.py --simulate 1 -i 1 -a 0.1 -b 0.35 -d 100 -ps 100\n" 
+                    "2) real data tracker\n"
+                    "   Example: $ python3 sir_model.py --country Liberia\n"
+                    "3) 1) + 2)\n"
+                    "   Example: $ python3 sir_model.py --country Liberia --simulate 1 -b 0.27 -a 0.2\n"
+                    "-----------------------------------------------------\n",
         formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument(
         "-c",
         "--country",
         type=str,
         choices=['Guinea', 'Liberia'],
-        help="input truth file",
+        help="choose one of two supported countries",
         required=False,
     )
     parser.add_argument(
         "-s",
         "--simulate",
         type=bool,
-        help="input truth file",
+        help="indicator for simulation run",
         required=False,
     )
     parser.add_argument(
         "-ps",
         "--population_size",
         type=int,
-        help="input truth file",
+        help="total number of samples",
         required=False,
     )
     parser.add_argument(
         "-ii",
         "--initial_infectous",
         type=int,
-        help="input truth file",
+        help="number of initial infected samples",
         required=False,
     )
     parser.add_argument(
         "-a",
         "--alpha",
         type=float,
-        help="input truth file",
+        help="recovery rate",
         required=False,
     )
     parser.add_argument(
         "-b",
         "--beta",
         type=bool,
-        help="input truth file",
+        help="disease transmission rate",
         required=False,
     )
     parser.add_argument(
         "-d",
         "--days",
         type=int,
-        help="input truth file",
+        help="number of days for time series",
         required=False,
     )
     args = parser.parse_args()
     return args
 
 def validate_args(args):
+    if args.simulate and args.country:
+        print('Values for [initial infectous, days, population size] will be ignored in this run.')
+        return
+
     if args.simulate:
         related_args = np.array([
             args.population_size,
@@ -117,7 +127,7 @@ def plot_stats(time, total_population, suspected, infectous, recovered, country 
     plt.grid()
     plt.legend()
     plt.xlabel("days")
-    plt.xlabel("stats")
+    plt.ylabel("population")
 
     if country:
         plt.savefig('{}.svg'.format(country))
@@ -125,7 +135,7 @@ def plot_stats(time, total_population, suspected, infectous, recovered, country 
         plt.savefig('simulation.svg')
 
 
-def simulate_sir_model(population, initial_infectous, days, alpha, beta, scale = 1000):
+def simulate_sir_model(population, initial_infectous, alpha, beta, scale = 1000, days = None):
     def SIR_model(y, t, alpha, beta):
         S, I, R = y
 
@@ -135,7 +145,7 @@ def simulate_sir_model(population, initial_infectous, days, alpha, beta, scale =
 
         return ([dS_dt, dI_dt, dR_dt])
 
-    time = np.linspace(0, 100, 10000)
+    time = [x for x in range(days)] if days else np.linspace(0, 100, 10000)
     population_arr = [population/scale]*len(time)
 
 
@@ -198,25 +208,27 @@ def main():
     args = get_args()
     validate_args(args)
 
-    if args.country:
+    if args.country and args.simulate:
+        print("Running mode 3)\n")
         cleaned_data = data_preproccessing(args.country)
         cp, dm = get_2014_population_and_average_death_rate(world_population, args.country)
 
-        time, population, S, I, R = track_sir_model(cleaned_data, cp, dm)
+        time_x, population, S, I, R = track_sir_model(cleaned_data, cp, dm)
         plot_stats(
-            time=time,
+            time=time_x,
             total_population=population,
             suspected=S,
             infectous=I,
             recovered=R,
-            country = args.country,
+            country=args.country,
         )
-    if args.simulate:
         time, population, S, I, R = simulate_sir_model(
-            args.population_size,
-            args.initial_infectous,
-            args.days, args.alpha,
-            args.beta
+            population=cp,
+            initial_infectous=cleaned_data['Cases_{}'.format(args.country)].to_numpy()[0] / 1000,
+            alpha=args.alpha,
+            beta=args.beta,
+            days=time_x[len(time_x) - 1],
+            scale=1,
         )
         plot_stats(
             time=time,
@@ -225,6 +237,36 @@ def main():
             infectous=I,
             recovered=R,
         )
+    else:
+        if args.country:
+            print("Running mode 2)\n")
+            cleaned_data = data_preproccessing(args.country)
+            cp, dm = get_2014_population_and_average_death_rate(world_population, args.country)
+
+            time, population, S, I, R = track_sir_model(cleaned_data, cp, dm)
+            plot_stats(
+                time=time,
+                total_population=population,
+                suspected=S,
+                infectous=I,
+                recovered=R,
+                country=args.country,
+            )
+        if args.simulate:
+            print("Running mode 1)\n")
+            time, population, S, I, R = simulate_sir_model(
+                population=args.population_size,
+                initial_infectous=args.initial_infectous,
+                alpha=args.alpha,
+                beta=args.beta
+            )
+            plot_stats(
+                time=time,
+                total_population=population,
+                suspected=S,
+                infectous=I,
+                recovered=R,
+            )
 
 if __name__ == "__main__":
     main()
