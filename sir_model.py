@@ -6,6 +6,7 @@ import pandas as pd
 import urllib.request
 import scipy.integrate
 import sys
+from sklearn import preprocessing
 
 
 world_population = {
@@ -101,6 +102,10 @@ def get_args():
 
 def validate_args(args):
     if args.simulate and args.country:
+        if args.alpha is None:
+            print('Missing disease transmission rate (--beta/-b)\n')
+        if args.beta is None:
+            print('Missing recovery rate (--alpha/-a)\n')
         print('Values for [initial infectous, days, population size] will be ignored in this run.')
         return
 
@@ -116,27 +121,38 @@ def validate_args(args):
             print('Some required args for simulation mode are missing. See usage.')
             sys.exit(1)
 
-def plot_stats(time, total_population, suspected, infectous, recovered, country = None):
-    plt.figure(figsize=[6, 4])
+def plot_stats(time, total_population, suspected, infectous, recovered, output):
+    def plot_population_and_suspected():
+        fig = plt.figure(figsize=[6, 4])
 
-    plt.plot(time, total_population, label='POPULATION', color = 'blue', marker='x')
-    plt.plot(time, suspected, label='SUSPECTED', color = 'green', linestyle = 'dashed')
-    plt.plot(time, infectous, label='INFECTOUS', color = 'red')
-    plt.plot(time, recovered, label='RECOVERED', color = 'black')
+        plt.plot(time, total_population, label='POPULATION', color='blue', marker='x')
+        plt.plot(time, suspected, label='SUSPECTED', color='green', linestyle='dashed')
 
-    plt.grid()
-    plt.legend()
-    plt.xlabel("days")
-    plt.ylabel("population")
+        plt.grid()
+        plt.legend()
+        plt.xlabel("days")
+        plt.ylabel("population / suspected")
 
-    if country:
-        plt.savefig('{}.svg'.format(country))
-    else:
-        plt.savefig('simulation.svg')
+        plt.savefig("{}_population.png".format(output))
 
+    def plot_infectious_and_recovered():
+        fig = plt.figure(figsize=[6, 4])
+
+        plt.plot(time, infectous, label='INFECTIOUS', color='red')
+        plt.plot(time, recovered, label='RECOVERED', color='black')
+
+        plt.grid()
+        plt.legend()
+        plt.xlabel("days")
+        plt.ylabel("infectious / recovered or death")
+
+        plt.savefig("{}_inf.png".format(output))
+
+    plot_population_and_suspected()
+    plot_infectious_and_recovered()
 
 def simulate_sir_model(population, initial_infectous, alpha, beta, scale = 1000, days = None):
-    def SIR_model(y, t, alpha, beta):
+    def SIR_model(y, time, beta, alpha):
         S, I, R = y
 
         dS_dt = -beta * S * I
@@ -145,15 +161,15 @@ def simulate_sir_model(population, initial_infectous, alpha, beta, scale = 1000,
 
         return ([dS_dt, dI_dt, dR_dt])
 
-    time = [x for x in range(days)] if days else np.linspace(0, 100, 10000)
-    population_arr = [population/scale]*len(time)
+    time = [x for x in range(days)] if days else np.linspace(0, 100, 100)
+    population_arr = [population / scale]*len(time)
 
 
-    s_0 = population / scale - initial_infectous / scale
+    s_0 = population / scale
     i_0 = initial_infectous / scale
-    r_0 = 0
+    r_0 = 0.0
 
-    eq_sol = scipy.integrate.odeint(SIR_model, [s_0, i_0, r_0], time, args=(alpha, beta))
+    eq_sol = scipy.integrate.odeint(SIR_model, [s_0, i_0, r_0], time, args=(beta, alpha))
     eq_sol = np.array(eq_sol)
 
     return time, population_arr, eq_sol[:, 0], eq_sol[:, 1], eq_sol[:, 2]
@@ -172,21 +188,20 @@ def data_preproccessing(country):
     return cleaned.sort_values('Day')
 
 def get_2014_population_and_average_death_rate(world_population, country):
-    country_population = world_population[country]['2015'][0]
-    year_death_rates = np.array([v[1] for k,v in world_population[country].items()])
+    country_population = world_population[country]['2015'][0]*1000
+    year_death_rates = np.array([v[1]*1000 for k,v in world_population[country].items()])
     average_death_rate = np.average(year_death_rates)
 
     # estimate population size in 2014
-    country_population_2014 = country_population - country_population * average_death_rate
+    country_population_2014 = int(country_population - country_population * average_death_rate/100)
     # estimate daily mortality
-    daily_moratlity_2014 = (country_population-country_population_2014)/365
-
+    daily_moratlity_2014 = int((country_population-country_population_2014)/365)
     return country_population_2014, daily_moratlity_2014
 
 def track_sir_model(data, population_size, daily_moratility):
     # initial values, naivly total population is marked as suspected
     suspected = [population_size]
-    infectous = [0]
+    infectious = [0]
     recovered_or_death = [0]
     population = [population_size]
     time = [0]
@@ -197,12 +212,13 @@ def track_sir_model(data, population_size, daily_moratility):
 
     for i in range(days.shape[0]-1):
         time.append(days[i])
-        population.append(int(population_size + (daily_moratility*population_size)*(days[i+1]-days[i])))
-        infectous.append(new_casses[i])
+        population.append(population_size + daily_moratility)
+        infectious.append(new_casses[i])
         recovered_or_death.append(new_deaths[i])
-        suspected.append(population[i] - infectous[i] - recovered_or_death[i])
+        suspected.append((population[i] - infectious[i] - recovered_or_death[i]))
 
-    return time, population, suspected, infectous, recovered_or_death
+
+    return time, population, suspected, infectious, recovered_or_death
 
 def main():
     args = get_args()
@@ -220,8 +236,9 @@ def main():
             suspected=S,
             infectous=I,
             recovered=R,
-            country=args.country,
+            output=args.country,
         )
+
         time, population, S, I, R = simulate_sir_model(
             population=cp,
             initial_infectous=cleaned_data['Cases_{}'.format(args.country)].to_numpy()[0] / 1000,
@@ -243,14 +260,14 @@ def main():
             cleaned_data = data_preproccessing(args.country)
             cp, dm = get_2014_population_and_average_death_rate(world_population, args.country)
 
-            time, population, S, I, R = track_sir_model(cleaned_data, cp, dm)
+            time, population, S, I, R = track_sir_model(cleaned_data, cp*1000, dm*1000)
             plot_stats(
                 time=time,
                 total_population=population,
                 suspected=S,
                 infectous=I,
                 recovered=R,
-                country=args.country,
+                output=args.country,
             )
         if args.simulate:
             print("Running mode 1)\n")
@@ -266,6 +283,7 @@ def main():
                 suspected=S,
                 infectous=I,
                 recovered=R,
+                output='simulate',
             )
 
 if __name__ == "__main__":
