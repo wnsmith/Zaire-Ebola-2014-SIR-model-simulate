@@ -4,7 +4,7 @@
 
 # 1) classic simulator
 
-```  $ python3 sir_model.py --simulate 1 --initial_infectous 1 --alpha 0 --beta 0.35 --days 100 --population_size 100 ```
+```  $ python3 sir_model.py --simulate 1 --initial_infectous 1 --alpha 0.1 --beta 0.35 --days 100 --population_size 100 ```
 
 # 2) real data tracker
 
