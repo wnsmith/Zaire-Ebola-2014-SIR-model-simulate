@@ -6,7 +6,7 @@
 
 ```  $ python3 sir_model.py --simulate 1 --initial_infectous 1 --alpha 0 --beta 0.35 --days 100 --population_size 100 ```
 
-# 2) real data tricker
+# 2) real data tracker
 
 ``` $ python3 sir_model.py --country Liberia ```
 
